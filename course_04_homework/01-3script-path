@@ -1,13 +1,10 @@
 
 """
-Bob&Alice双签+超过8000后Alice可直接使用私钥花费 + Hash 三脚本测试 - Commit 脚本
-
-创建一个包含 hash script (helloworld) ， Bob&Alice双签script和超过8000个区块后Alice可直接使用私钥花费的三脚本 Taproot 地址
-
-两种花费方式：
-1. Script Path 1：任何人提供 preimage "helloworld" 来花费
-2. Script Path 2：Bob&Alice双签花费
-3. Script Path 3：当超过8000个区块后，Alice可直接使用私钥解锁
+创建一个带有三解锁脚本的Taproot地址，并使用四个路径来解锁花费
+花费方式：
+1. Script Path 1：任何人提供preimage "helloworld" 来花费
+2. Script Path 2：Bob&Alice&Charlie 2-of-3多签花费
+3. Script Path 3：时间锁+Alice，当超过80000个区块后，Alice可直接使用私钥解锁
 4. Key Path：内部私钥直接花费
 """
 
@@ -26,13 +23,17 @@ def main():
     key_private = PrivateKey('')
     key_public = key_private.get_public_key()
 
-    # Alice 的密钥（Script Path 2，双签）
+    # Alice 的密钥（Script Path 2，2-of-3多签）
     alice_private = PrivateKey('')
     alice_public = alice_private.get_public_key()
     
-    # Bob 的密钥（Script Path 2，双签）
+    # Bob 的密钥（Script Path 2，2-of-3多签）
     bob_private = PrivateKey('')
     bob_public = bob_private.get_public_key()
+
+    # Charlie 的密钥（Script Path 2，2-of-3多签）
+    charlie_private = PrivateKey('')
+    charlie_public = charlie_private.get_public_key()
     
     # 创建 preimage 的哈希（Script Path 1）
     preimage = "helloworld"
@@ -47,11 +48,12 @@ def main():
         'OP_TRUE'
     ])
     
-    # Script Path 2: Bob&Alice 的双签签名脚本 - P2PK
-    bob&alice_script = Script([
-        OP_2,	
+    # Script Path 2: bob&alice&charlie 的多签脚本 - P2PK
+    bob&alice&charlie_script = Script([
+        OP_2, 
         bob_public.to_x_only_hex(),
         alice_public.to_x_only_hex(),
+        charlie_public.to_x_only_hex(),
         OP_3,
         OP_CHECKMULTISIG
     ])
@@ -63,24 +65,98 @@ def main():
         OP_CHECKSIG
     ])
     
-    print("=== Bob&Alice双签 + 时间锁定 + Hash 三脚本 Taproot 地址信息 ===")
-    print(f"内部 私钥 (Key Path): {key_private.to_wif()}")
-    print(f"内部 公钥 (Internal Key): {key_public.to_hex()}")
-    print(f"Alice 私钥 (Script Path 2): {alice_private.to_wif()}")
-    print(f"Alice 公钥 (Script Path 2): {alice_public.to_hex()}")
-    print(f"Bob 私钥 (Script Path 2): {bob_private.to_wif()}")
-    print(f"Bob 公钥 (Script Path 2): {bob_public.to_hex()}")
-    #print(f"Bob 公钥 (x-only): {bob_public.to_x_only_hex()}")
-    print(f"Preimage (Script Path 1): {preimage}")
-    print(f"Preimage Hash: {preimage_hash}")
-
-    
-    # 按照验证的双脚本模式创建脚本树：平铺结构
-    all_leafs = [[hash_script, bob_alice_script], time_over_alice_script]
-    to_address = key_public.get_taproot_address(all_leafs)
-
-
+    # 按照验证的三脚本模式创建脚本树：平铺结构
+    all_leafs = [[hash_script, bob&alice&charlie_script], time_over_alice_script]
+    three_path_taproot_address = key_public.get_taproot_address(all_leafs)
+    #这里需要查一下
+    control_block = ControlBlock(key_public, [[all_leafs]], 0, is_odd=three_path_taproot_address.is_odd())
+    # 输出三脚本地址
     print(f"\nTaproot 地址: {taproot_address.to_string()}")
+
+    print(f"\n=== === === === ===  多路径解锁 === === === === ===  ")
+    print(f"\n=== === === === ===  path1 提供preimage解锁 === === === === ===  ")
+    # Commit 信息
+    commit_txid1 = "4fd83128fb2df7cd25d96fdb6ed9bea26de755f212e37c3aa017641d3d2d2c6d"
+    input_amount = 0.00001200  # 1200 satoshis
+    output_amount = 0.00001000  # 1000 satoshi
+    txin = TxInput(commit_txid1, 0)
+    txout = TxOutput(to_satoshis(output_amount), alice_public.get_taproot_address().to_script_pub_key()) #发送给Alice
+    tx = Transaction([txin], [txout], has_segwit=True)
+    tx.witnesses.append(TxWitnessInput([preimage_bytes.hex(), all_leafs.to_hex(), control_block.to_hex()]))
+    print(f"Path1 交易哈希: {tx.get_txid()}")
+    print(f"\n=== === === === ===  path2 提供Bob&Alice&Charlie 2-of-3多签解锁 === === === === ===  ")
+    txin = TxInput(commit_txid, 0)
+    txout = TxOutput(to_satoshis(output_amount), receiving_address)
+    tx = Transaction([txin], [txout], has_segwit=True)
+    
+    # 生成两个签名 (Bob和Alice)
+    sig_bob = bob_private.sign_taproot_input(
+        tx, 0, [taproot_address.to_script_pub_key()], 
+        [to_satoshis(input_amount)], script_path=True,
+        tapleaf_script=multisig_script
+    )
+    
+    sig_alice = alice_private.sign_taproot_input(
+        tx, 0, [taproot_address.to_script_pub_key()], 
+        [to_satoshis(input_amount)], script_path=True,
+        tapleaf_script=multisig_script
+    )
+    
+    # 构建见证数据 (注意: CHECKMULTISIG需要额外一个OP_0)
+    tx.witnesses.append(TxWitnessInput([
+        'OP_0',  # CHECKMULTISIG的额外元素
+        sig_bob.to_hex(),
+        sig_alice.to_hex(),
+        multisig_script.to_hex(),
+        key_public.get_taproot_control_block(taproot_script_tree, multisig_script).to_hex()
+    ]))
+    
+    print(f"Path2 交易哈希: {tx.get_txid()}")
+
+    print(f"\n=== === === === ===  path3 时间锁+Alice私钥解锁 === === === === ===  ")
+    txin = TxInput(commit_txid, 0)
+    txout = TxOutput(to_satoshis(output_amount), receiving_address)
+    tx = Transaction([txin], [txout], has_segwit=True)
+    
+    # 设置锁定时间 (必须大于等于脚本中的80000)
+    tx.locktime = 80000
+    
+    # Alice签名
+    sig_alice = alice_private.sign_taproot_input(
+        tx, 0, [taproot_address.to_script_pub_key()], 
+        [to_satoshis(input_amount)], script_path=True,
+        tapleaf_script=timelock_script
+    )
+    
+    tx.witnesses.append(TxWitnessInput([
+        sig_alice.to_hex(),
+        timelock_script.to_hex(),
+        key_public.get_taproot_control_block(taproot_script_tree, timelock_script).to_hex()
+    ]))
+    
+    print(f"Path3 交易哈希: {tx.get_txid()}")
+ 
+    print(f"\n=== === === === ===  path4 内部私钥直接解锁 === === === === ===  ")
+
+    commit_txid4 = "4fd83128fb2df7cd25d96fdb6ed9bea26de755f212e37c3aa017641d3d2d2c6d"
+    txin = TxInput(commit_txid4, 0)
+    receiving_address_pubkey =  alice_public.get_taproot_address().to_script_pub_key()
+    txout = TxOutput(to_satoshis(output_amount), receiving_address_pubkey)
+    tx = Transaction([txin], [txout], has_segwit=True)
+    sig = key_private.sign_taproot_input(
+        tx,
+        0,
+        [three_path_taproot_address.to_script_pub_key()],
+        [to_satoshis(input_amount)],
+        script_path=False,
+        tapleaf_scripts=[all_leafs]  # 添加脚本树
+    )
+    tx.witnesses.append(TxWitnessInput([sig]))
+    print(f"Path4 交易哈希: {tx.get_txid()}")
+
 
 if __name__ == "__main__":
     main()
+
+
+
