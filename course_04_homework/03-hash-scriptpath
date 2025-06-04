@@ -1,0 +1,51 @@
+"""
+使用 preimage "helloworld"解锁花费
+
+"""
+from bitcoinutils.setup import setup
+from bitcoinutils.utils import to_satoshis, ControlBlock
+from bitcoinutils.script import Script
+from bitcoinutils.transactions import Transaction, TxInput, TxOutput, TxWitnessInput
+from bitcoinutils.keys import PrivateKey, P2trAddress
+import hashlib
+
+def main():
+    setup('testnet')
+    
+    # Alice 的密钥（仅用于生成地址）
+    alice_private = PrivateKey('cRxebG1hY6vVgS9CSLNaEbEJaXkpZvc6nFeqqGT7v6gcW7MbzKNT')
+    alice_public = alice_private.get_public_key()
+    
+    # Preimage 和哈希
+    preimage = "helloworld"
+    preimage_hex = preimage.encode('utf-8').hex()  # 转换为十六进制
+    preimage_hash = hashlib.sha256(preimage.encode('utf-8')).hexdigest()
+    
+    # 脚本路径
+    tr_script = Script(['OP_SHA256', preimage_hash, 'OP_EQUALVERIFY', 'OP_TRUE'])
+    
+    # Taproot 地址
+    medium_sending_address = alice_public.get_taproot_address([[tr_script]])
+    control_block = ControlBlock(alice_public, [[tr_script]], 0, is_odd=medium_sending_address.is_odd())
+    
+    # Commit 信息
+    commit_txid = "e9b354b2f4b71fa2e21479c13c22e82978ac1240a4bb000c471ca8bbcc6331d3"
+    input_amount = 0.000011  # 7000 satoshis
+    output_amount = 0.000008
+    # Script Path 花费
+    txin = TxInput(commit_txid, 0)
+    txout = TxOutput(to_satoshis(output_amount), alice_public.get_taproot_address().to_script_pub_key())
+    tx = Transaction([txin], [txout], has_segwit=True)
+    tx.witnesses.append(TxWitnessInput([preimage_hex, tr_script.to_hex(), control_block.to_hex()]))
+    
+    # 输出验证信息
+    print(f"\n发送方的Taproot 地址: {medium_sending_address.to_string()}")
+    print(f"发送方的ScriptPubKey: {medium_sending_address.to_script_pub_key().to_hex()}")
+    print(f"\nInput Amount: {input_amount} tBTC ({to_satoshis(input_amount)} satoshis)")
+    print(f"Output Amount: {output_amount} tBTC ({to_satoshis(output_amount)} satoshis)")
+    print(f"Fee: {input_amount - output_amount} tBTC ({to_satoshis(input_amount) - to_satoshis(0.00001)} satoshis)")
+    print(f"\nScript Path TxId: {tx.get_txid()}")
+    print(f"\nRaw Tx: {tx.serialize()}")
+
+if __name__ == "__main__":
+    main()
