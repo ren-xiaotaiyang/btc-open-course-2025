@@ -1,0 +1,52 @@
+"""
+Taproot 脚本花费路径之一：keypath 
+"""
+from bitcoinutils.setup import setup
+from bitcoinutils.utils import to_satoshis, ControlBlock
+from bitcoinutils.script import Script
+from bitcoinutils.transactions import Transaction, TxInput, TxOutput, TxWitnessInput
+from bitcoinutils.keys import PrivateKey, P2trAddress
+import hashlib
+
+def main():
+    setup('testnet')
+    # keypath 的内部密钥
+    key_private = PrivateKey('')
+    key_public = key_private.get_public_key()
+    # sender 的 Taproot 地址
+    medium_sending_address =''
+    # Commit 信息
+    commit_txid = "4fd83128fb2df7cd25d96fdb6ed9bea26de755f212e37c3aa017641d3d2d2c6d"
+    input_amount = 0.00003900  # 3900 satoshis
+    
+    output_amount = 0.00003700  # 3700 satoshis
+    # Key Path 花费
+    txin = TxInput(commit_txid, 0)
+    receiving_address_pubkey =  key_public.get_taproot_address().to_script_pub_key()
+    txout = TxOutput(to_satoshis(output_amount), receiving_address_pubkey)
+    tx = Transaction([txin], [txout], has_segwit=True)
+    sig = key_private.sign_taproot_input(
+        tx,
+        0,
+        [medium_sending_address.to_script_pub_key()],
+        [to_satoshis(input_amount)],
+        script_path=False,
+        tapleaf_scripts=[tr_script]  # 添加脚本树
+    )
+    tx.witnesses.append(TxWitnessInput([sig]))
+    
+    # 输出验证信息
+    print(f"\n发送方的Taproot 地址: {medium_sending_address.to_string()}")
+    print(f"发送方的ScriptPubKey: {medium_sending_address.to_script_pub_key().to_hex()}")
+    print(f"接收方的ScriptPubKey: {receiving_address_pubkey.to_hex()}")
+    print(f"接收方的Taproot 地址,本代码是又发回了alice的地址: {key_public.get_taproot_address().to_string()}")
+    print(f"\nInput Amount: {input_amount} tBTC ({to_satoshis(input_amount)} satoshis)")
+    print(f"Output Amount:  tBTC ({to_satoshis(output_amount)} satoshis)")
+    print(f"Fee: {input_amount - output_amount} tBTC ({to_satoshis(input_amount) - to_satoshis(output_amount)} satoshis)")
+    print(f"\nUnsigned Tx: {tx.serialize()}")
+    print(f"\nSchnorr Signature: {sig}")
+    print(f"\nKey Path TxId: {tx.get_txid()}")
+    print(f"Raw Tx: {tx.serialize()}")
+
+if __name__ == "__main__":
+    main()
