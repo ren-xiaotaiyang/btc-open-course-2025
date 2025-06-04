@@ -12,6 +12,7 @@ from bitcoinutils.utils import to_satoshis
 from bitcoinutils.script import Script
 from bitcoinutils.transactions import Transaction, TxInput, TxOutput
 from bitcoinutils.keys import PrivateKey
+from bitcoinutils.constants import OP_0,OP_2, OP_3, OP_CHECKMULTISIG, OP_CHECKSIG, OP_SHA256, OP_EQUALVERIFY, OP_TRUE, OP_CHECKLOCKTIMEVERIFY, OP_DROP, SIGHASH_ALL
 import hashlib
 
 
